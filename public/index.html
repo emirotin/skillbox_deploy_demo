@@ -17,7 +17,7 @@
   <body>
     <div class="uk-container">
       <button id="dec" class="uk-button uk-button-primary" disabled>-</button>
-      <span id="counter">0</span>
+      <span id="counter">&nbsp;</span>
       <button id="inc" class="uk-button uk-button-primary" disabled>+</button>
     </div>
 
@@ -25,9 +25,7 @@
       const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${wsProto}//${location.host}`);
 
-      let count = 0;
-
-      const updateUi = () => (document.getElementById("counter").innerText = count);
+      const updateUi = (count) => (document.getElementById("counter").innerText = count);
 
       ws.addEventListener("message", (message) => {
         let data;
@@ -38,11 +36,12 @@
         }
 
         if (data.type === "ready") {
+          localStorage.setItem("sessionId", data.sessionId);
+          updateUi(data.value);
           document.getElementById("dec").removeAttribute("disabled");
           document.getElementById("inc").removeAttribute("disabled");
         } else if (data.type === "value") {
-          count = data.value;
-          updateUi();
+          updateUi(data.value);
         }
       });
 
@@ -50,7 +49,7 @@
         ws.send(
           JSON.stringify({
             type: "init",
-            value: count,
+            sessionId: localStorage.getItem("sessionId"),
           })
         );
       });

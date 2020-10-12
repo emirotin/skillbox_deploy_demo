@@ -3,6 +3,8 @@ require("dotenv").config();
 const http = require("http");
 const path = require("path");
 const express = require("express");
+const { MongoClient } = require("mongodb");
+const { nanoid } = require("nanoid");
 const WebSocketServer = require("ws").Server;
 
 const app = express();
@@ -12,10 +14,20 @@ app.use(express.static(path.join(__dirname, "public")));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-wss.on("connection", (ws) => {
-  let count = null;
+const dbPromise = MongoClient.connect(process.env.MONGO_URI, {
+  useUnifiedTopology: true,
+  useNewUrlParser: true,
+});
 
-  ws.on("message", (data) => {
+const getDbCollection = async () => {
+  const dbClient = await dbPromise;
+  return dbClient.db().collection("counter");
+};
+
+wss.on("connection", (ws) => {
+  let sessionId = null;
+
+  ws.on("message", async (data) => {
     try {
       data = JSON.parse(data);
     } catch (err) {
@@ -24,19 +36,37 @@ wss.on("connection", (ws) => {
 
     switch (data.type) {
       case "init": {
-        count = data.value;
+        let count;
+        if (data.sessionId) {
+          sessionId = data.sessionId;
+          const dbCollection = await getDbCollection();
+          count = (await dbCollection.findOne({ sessionId })).count;
+        } else {
+          sessionId = nanoid();
+          count = 0;
+          const dbCollection = await getDbCollection();
+          await dbCollection.insertOne({ sessionId, count: 0 });
+        }
         ws.send(
           JSON.stringify({
             type: "ready",
+            value: count,
+            sessionId,
           })
         );
         break;
       }
       case "dec": {
-        if (count === null) {
+        if (sessionId === null) {
           return;
         }
-        count -= 1;
+        const dbCollection = await getDbCollection();
+        const doc = await dbCollection.findOneAndUpdate(
+          { sessionId },
+          { $inc: { count: -1 } },
+          { returnOriginal: false }
+        );
+        const { count } = doc.value;
         ws.send(
           JSON.stringify({
             type: "value",
@@ -46,10 +76,16 @@ wss.on("connection", (ws) => {
         break;
       }
       case "inc": {
-        if (count === null) {
+        if (sessionId === null) {
           return;
         }
-        count += 1;
+        const dbCollection = await getDbCollection();
+        const doc = await dbCollection.findOneAndUpdate(
+          { sessionId },
+          { $inc: { count: 1 } },
+          { returnOriginal: false }
+        );
+        const { count } = doc.value;
         ws.send(
           JSON.stringify({
             type: "value",
